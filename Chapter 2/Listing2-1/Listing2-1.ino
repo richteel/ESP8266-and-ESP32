@@ -12,12 +12,16 @@
 #include <EEPROM.h>         // include EEPROM
 #include "config_pins.h"        // configure instructions tab
 uint8_t SDtype;
-int SDpics;             // number of pictures on SD card
 int maxPhoto = 0;           // maximum number of photos
 int Nphoto = 0;           // number of photos taken
 int photoTime = 2000;         // delay (ms) between photos
 String filename;
 unsigned long nowTime, lastTime = 0;
+struct settings_t
+{
+  byte            eepromInit; //
+  unsigned long   SDpics;     // number of pictures on SD card unsigned long allows 4,294,967,295 pictures before over writing
+} settings;
 
 void setup()
 {
@@ -28,16 +32,36 @@ void setup()
   Serial.println("initialising camera, then take photos");
   configCamera();           // functions to configure camera
   initSDcard();           // and to initialise micro-SD card
-  EEPROM.begin(1);          // EEPROM with one record
-  SDpics = EEPROM.read(0);        // number of saved pictures
+  EEPROM.begin(5);          // EEPROM with five bytes
+  settings.eepromInit = EEPROM.read(0) == 0;
+  settings.SDpics = EEPROM.readULong(1);  // number of saved pictures
+
+  if(!settings.eepromInit) {
+    settings.eepromInit = true;
+    settings.SDpics = 0;
+    Serial.println("Initialized EEPROM");
+    EEPROM.write(0, 0);
+    EEPROM.writeULong(1, settings.SDpics);
+    EEPROM.commit();
+  }
+  Serial.print("settings.eepromInit = "); Serial.println(settings.eepromInit);
+  Serial.print("settings.SDpics = "); Serial.println(settings.SDpics);
 }
 
 void loop()
 {
   while (Serial.available()>0)      // maximum photo number
   {
-    maxPhoto = Serial.parseInt();     // parsed from Serial buffer
-    Nphoto = 0;
+    int inputMaxPhoto = Serial.parseInt();  // parsed from Serial buffer
+
+    if (inputMaxPhoto > 0) {
+      maxPhoto = inputMaxPhoto;
+      Nphoto = 0;
+      Serial.print("will take "); Serial.print(maxPhoto); Serial.println(" photos");
+    }
+    else {
+      Serial.println("warning value is not a number");
+    }
   }           // if photo number < maximum photo number
   nowTime = millis();         // take photo after photoTime
   if((nowTime - lastTime > photoTime) && (Nphoto < maxPhoto))
@@ -77,8 +101,8 @@ void takePhoto()            // function to take and save photo
     Serial.println("photo capture error");
     return;
   }
-  SDpics ++;              // increase picture number
-  filename = "/picture" + String(SDpics) +".jpg"; // generate JPEG filename
+  settings.SDpics ++;              // increase picture number
+  filename = "/picture" + String(settings.SDpics) +".jpg"; // generate JPEG filename
   fs::FS & fs = SD_MMC;
   File file = fs.open(filename.c_str(), FILE_WRITE);  // access SD card
   if(!file) Serial.println("file save error");
@@ -86,8 +110,8 @@ void takePhoto()            // function to take and save photo
   {
     file.write(frame->buf, frame->len);     // save file to SD card
     Serial.print("Picture filename: ");Serial.println(filename);
-    EEPROM.write(0, SDpics);          // update EEPROM with
-    EEPROM.commit();            //  picture number
+    EEPROM.writeULong(1, settings.SDpics);  // update EEPROM with
+    EEPROM.commit();                        // picture number
   }
   file.close();             // close file on SD card
   esp_camera_fb_return(frame);    //return frame buffer to driver for reuse
